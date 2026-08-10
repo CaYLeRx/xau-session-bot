@@ -145,37 +145,27 @@ def session_end_message(session_name):
     )
 
 def get_next_session_event():
-    """Calculate the next session event (start or end) and sleep until then."""
+    """Calculate the next session event (start or end) and seconds until it."""
     now_utc = now_in_tz(TZ_UTC)
     
-    # Define all events for today in UTC
     events = []
     for session in SESSIONS:
-        # Start event
         start_dt = now_utc.replace(hour=session["start"], minute=0, second=0, microsecond=0)
-        # End event
         end_dt = now_utc.replace(hour=session["end"], minute=0, second=0, microsecond=0)
-        
         events.append((start_dt, session["name"], "start"))
         events.append((end_dt, session["name"], "end"))
     
-    # Sort events by time
     events.sort(key=lambda x: x[0])
     
-    # Find the next event that hasn't happened yet
     for event_dt, session_name, event_type in events:
         if event_dt > now_utc:
-            sleep_seconds = (event_dt - now_utc).total_seconds()
-            return session_name, event_type, sleep_seconds
+            return session_name, event_type, (event_dt - now_utc).total_seconds()
     
-    # If no more events today, sleep until midnight UTC for tomorrow's first event
     tomorrow = now_utc + timedelta(days=1)
     tomorrow_midnight = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
-    sleep_seconds = (tomorrow_midnight - now_utc).total_seconds()
-    return "Tokyo", "start", sleep_seconds
+    return "Tokyo", "start", (tomorrow_midnight - now_utc).total_seconds()
 
 def run():
-    # Test mode: send immediate test message and exit
     if os.environ.get("TEST_MODE", "").strip().lower() in ("1", "true", "yes"):
         send_discord_embed(
             title="✅ XAUUSD Session Bot — TEST",
@@ -184,29 +174,34 @@ def run():
         )
         return
     
+    active_sessions = get_active_sessions()
+    if active_sessions:
+        sessions_text = " | ".join(active_sessions)
+        send_discord_embed(
+            title="🤖 XAUUSD Session Bot — Started",
+            description=f"Bot is now online.\n\n**Currently Active:** {sessions_text}\n\nNext post will be at the next session event.",
+            color=16766720
+        )
+    
     print("Bot started. Waiting for session events...")
     
     while True:
         try:
             session_name, event_type, sleep_seconds = get_next_session_event()
             
-            # Cap sleep at max 24 hours
             if sleep_seconds > 86400:
                 sleep_seconds = 86400
             
             next_time = now_in_tz(TZ_UTC) + timedelta(seconds=sleep_seconds)
             print(f"Next event: {session_name} {event_type} at {next_time.strftime('%Y-%m-%d %H:%M UTC')} (in {sleep_seconds/3600:.1f}h)")
             
-            # Sleep until the event
             time.sleep(sleep_seconds)
             
-            # Send the message
             if event_type == "start":
                 session_start_message(session_name)
             else:
                 session_end_message(session_name)
             
-            # Small buffer to avoid double-posting
             time.sleep(5)
             
         except Exception as e:

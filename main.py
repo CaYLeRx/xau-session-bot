@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from datetime import datetime
 import pytz
@@ -10,8 +11,9 @@ DISCORD_WEBHOOK_URL = (
     os.environ.get("DISCORD_WEBHOOK_URL")
     or os.environ.get("DISCORD_WEBHOOK")
     or os.environ.get("WEBHOOK_URL")
-    or "https://discord.com/api/webhooks/1536234080344215592/ghSZUG9w3Mx1ew7Ws9rNb9mBJaBgo6o1wLQwHJXvpcOuAuV0633-tsvPag-TRp_rf4li"
 )
+if not DISCORD_WEBHOOK_URL:
+    raise RuntimeError("DISCORD_WEBHOOK_URL is required")
 PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "GC=F")
 CURRENCY = os.environ.get("CURRENCY", "$")
 
@@ -26,12 +28,14 @@ TZ_NY = pytz.timezone("America/New_York")
 TZ_UTC = pytz.utc
 
 # === SESSIONS ===
-# Each entry: name, timezone, start_hour, end_hour, flag
 SESSIONS = [
     {"name": "Tokyo", "tz": TZ_TOKYO, "start": 0, "end": 9, "flag": "🇯🇵"},
     {"name": "London", "tz": TZ_LONDON, "start": 8, "end": 17, "flag": "🇬🇧"},
     {"name": "New York", "tz": TZ_NY, "start": 13, "end": 22, "flag": "🇺🇸"},
 ]
+
+# Track last sent event to avoid duplicates
+_last_sent_key = None
 
 def now_in_tz(tz):
     return datetime.now(tz)
@@ -59,23 +63,6 @@ def get_price_change():
     except Exception as e:
         print(f"Change fetch error: {e}")
     return None, None, None
-
-def get_session_range_change(session_name, start_hour, end_hour):
-    """Calculate change from previous same session close to current session close."""
-    try:
-        ticker = yf.Ticker(PRICE_SOURCE)
-        data = ticker.history(period="5d")
-        if len(data) < 2:
-            return None, None, None
-        current = float(data["Close"].iloc[-1])
-        # Previous session close is the close before the latest bar
-        previous = float(data["Close"].iloc[-2])
-        change = current - previous
-        pct = (change / previous) * 100
-        return current, change, pct
-    except Exception as e:
-        print(f"Session range change error: {e}")
-        return None, None, None
 
 def format_price(price):
     if price is None:
@@ -133,7 +120,7 @@ def session_start_message(session_name):
 **Previous Session Change:** {format_price(change)} ({pct:+.2f}%)
 **Active Sessions:** {sessions_text}
 
-{get_session_name(session_name)} is now open. Gold is trading at {format_price(current_price)}. """
+{session_name} is now open. Gold is trading at {format_price(current_price)}. """
     
     send_discord_embed(
         title=f"🥇 {session_name} Session Start — XAUUSD",
@@ -153,7 +140,7 @@ def session_end_message(session_name):
     description = f"""**Session Result:** {format_price(change)} ({pct:+.2f}%)
 **Current Price:** {format_price(current_price)}
 
-{get_session_name(session_name)} has closed. Gold is now at {format_price(current_price)}. """
+{session_name} has closed. Gold is now at {format_price(current_price)}. """
     
     send_discord_embed(
         title=f"🔔 {session_name} Session End — XAUUSD",
@@ -161,31 +148,18 @@ def session_end_message(session_name):
         color=color
     )
 
-def get_session_name(name):
-    return name
-
-def main():
-    if not DISCORD_WEBHOOK_URL:
-        print("ERROR: DISCORD_WEBHOOK_URL not set")
-        return
-    
-    # Test mode: send immediate test message and exit
-    if os.environ.get("TEST_MODE", "").strip().lower() in ("1", "true", "yes"):
-        send_discord_embed(
-            title="✅ XAUUSD Session Bot — TEST",
-            description="If you can read this, the bot works.\nWebhook delivery: OK",
-            color=65280
-        )
-        return
+def check_and_send():
+    global _last_sent_key
     
     now_utc = now_in_tz(TZ_UTC)
+    current_key = now_utc.strftime("%Y-%m-%d %H:%M")
+    
+    # Skip if we already sent for this minute
+    if _last_sent_key == current_key:
+        return
+    
     hour_utc = now_utc.hour
     minute_utc = now_utc.minute
-    
-    # Check for session events
-    # Tokyo: 00:00 start, 09:00 end
-    # London: 08:00 start, 17:00 end
-    # New York: 13:00 start, 22:00 end
     
     events = []
     
@@ -208,14 +182,38 @@ def main():
         events.append(("New York", "end"))
     
     if not events:
-        print(f"No session event at {now_utc.strftime('%Y-%m-%d %H:%M UTC')}")
         return
+    
+    # Mark as sent for this minute
+    _last_sent_key = current_key
     
     for session_name, event_type in events:
         if event_type == "start":
             session_start_message(session_name)
         else:
             session_end_message(session_name)
+
+def main():
+    if not DISCORD_WEBHOOK_URL:
+        print("ERROR: DISCORD_WEBHOOK_URL not set")
+        return
+    
+    # Test mode: send immediate test message and exit
+    if os.environ.get("TEST_MODE", "").strip().lower() in ("1", "true", "yes"):
+        send_discord_embed(
+            title="✅ XAUUSD Session Bot — TEST",
+            description="If you can read this, the bot works.\nWebhook delivery: OK",
+            color=65280
+        )
+        return
+    
+    print("Bot started. Waiting for session events...")
+    while True:
+        try:
+            check_and_send()
+        except Exception as e:
+            print(f"Loop error: {e}")
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()

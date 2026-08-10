@@ -1,8 +1,7 @@
 import os
-import json
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import yfinance as yf
 
@@ -33,9 +32,6 @@ SESSIONS = [
     {"name": "London", "tz": TZ_LONDON, "start": 8, "end": 17, "flag": "🇬🇧"},
     {"name": "New York", "tz": TZ_NY, "start": 13, "end": 22, "flag": "🇺🇸"},
 ]
-
-# Track last sent event to avoid duplicates
-_last_sent_key = None
 
 def now_in_tz(tz):
     return datetime.now(tz)
@@ -148,56 +144,37 @@ def session_end_message(session_name):
         color=color
     )
 
-def check_and_send():
-    global _last_sent_key
-    
+def get_next_session_event():
+    """Calculate the next session event (start or end) and sleep until then."""
     now_utc = now_in_tz(TZ_UTC)
-    current_key = now_utc.strftime("%Y-%m-%d %H:%M")
     
-    # Skip if we already sent for this minute
-    if _last_sent_key == current_key:
-        return
-    
-    hour_utc = now_utc.hour
-    minute_utc = now_utc.minute
-    
+    # Define all events for today in UTC
     events = []
+    for session in SESSIONS:
+        # Start event
+        start_dt = now_utc.replace(hour=session["start"], minute=0, second=0, microsecond=0)
+        # End event
+        end_dt = now_utc.replace(hour=session["end"], minute=0, second=0, microsecond=0)
+        
+        events.append((start_dt, session["name"], "start"))
+        events.append((end_dt, session["name"], "end"))
     
-    # Tokyo
-    if hour_utc == 0 and minute_utc == 0:
-        events.append(("Tokyo", "start"))
-    if hour_utc == 9 and minute_utc == 0:
-        events.append(("Tokyo", "end"))
+    # Sort events by time
+    events.sort(key=lambda x: x[0])
     
-    # London
-    if hour_utc == 8 and minute_utc == 0:
-        events.append(("London", "start"))
-    if hour_utc == 17 and minute_utc == 0:
-        events.append(("London", "end"))
+    # Find the next event that hasn't happened yet
+    for event_dt, session_name, event_type in events:
+        if event_dt > now_utc:
+            sleep_seconds = (event_dt - now_utc).total_seconds()
+            return session_name, event_type, sleep_seconds
     
-    # New York
-    if hour_utc == 13 and minute_utc == 0:
-        events.append(("New York", "start"))
-    if hour_utc == 22 and minute_utc == 0:
-        events.append(("New York", "end"))
-    
-    if not events:
-        return
-    
-    # Mark as sent for this minute
-    _last_sent_key = current_key
-    
-    for session_name, event_type in events:
-        if event_type == "start":
-            session_start_message(session_name)
-        else:
-            session_end_message(session_name)
+    # If no more events today, sleep until midnight UTC for tomorrow's first event
+    tomorrow = now_utc + timedelta(days=1)
+    tomorrow_midnight = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+    sleep_seconds = (tomorrow_midnight - now_utc).total_seconds()
+    return "Tokyo", "start", sleep_seconds
 
-def main():
-    if not DISCORD_WEBHOOK_URL:
-        print("ERROR: DISCORD_WEBHOOK_URL not set")
-        return
-    
+def run():
     # Test mode: send immediate test message and exit
     if os.environ.get("TEST_MODE", "").strip().lower() in ("1", "true", "yes"):
         send_discord_embed(
@@ -208,12 +185,33 @@ def main():
         return
     
     print("Bot started. Waiting for session events...")
+    
     while True:
         try:
-            check_and_send()
+            session_name, event_type, sleep_seconds = get_next_session_event()
+            
+            # Cap sleep at max 24 hours
+            if sleep_seconds > 86400:
+                sleep_seconds = 86400
+            
+            next_time = now_in_tz(TZ_UTC) + timedelta(seconds=sleep_seconds)
+            print(f"Next event: {session_name} {event_type} at {next_time.strftime('%Y-%m-%d %H:%M UTC')} (in {sleep_seconds/3600:.1f}h)")
+            
+            # Sleep until the event
+            time.sleep(sleep_seconds)
+            
+            # Send the message
+            if event_type == "start":
+                session_start_message(session_name)
+            else:
+                session_end_message(session_name)
+            
+            # Small buffer to avoid double-posting
+            time.sleep(5)
+            
         except Exception as e:
             print(f"Loop error: {e}")
-        time.sleep(60)
+            time.sleep(60)
 
 if __name__ == "__main__":
-    main()
+    run()

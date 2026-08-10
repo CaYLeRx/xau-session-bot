@@ -6,9 +6,20 @@ import pytz
 import yfinance as yf
 
 # === CONFIG ===
-DISCORD_WEBHOOK_URL = os.environ.get(https://discord.com/api/webhooks/1536234080344215592/ghSZUG9w3Mx1ew7Ws9rNb9mBJaBgo6o1wLQwHJXvpcOuAuV0633-tsvPag-TRp_rf4li)
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL") or os.environ.get("DISCORD_WEBHOOK") or os.environ.get("WEBHOOK_URL") or "https://discord.com/api/webhooks/1536234080344215592/ghSZUG9w3Mx1ew7Ws9rNb9mBJaBgo6o1wLQwHJXvpcOuAuV0633-tsvPag-TRp_rf4li"
+# === DEBUG ===
+print(f"DEBUG ENV candidates: webhook_set={bool(DISCORD_WEBHOOK_URL)} price_source={{PRICE_SOURCE!r}} currency={{CURRENCY!r}}")
+print(f"DEBUG ENV keys: {{sorted(k for k in os.environ if 'WEBHOOK' in k.upper() or 'DISCORD' in k.upper())}}")
+    os.environ.get("DISCORD_WEBHOOK_URL")
+    or os.environ.get("DISCORD_WEBHOOK")
+    or os.environ.get("WEBHOOK_URL")
+)
 PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "GC=F")  # Yahoo Finance ticker
 CURRENCY = os.environ.get("CURRENCY", "$")
+
+# === DEBUG ===
+print(f"DEBUG ENV candidates: webhook_set={bool(DISCORD_WEBHOOK_URL)} price_source={PRICE_SOURCE!r} currency={CURRENCY!r}")
+print(f"DEBUG ENV keys: {sorted(k for k in os.environ if 'WEBHOOK' in k.upper() or 'DISCORD' in k.upper())}")
 
 # === TIMEZONES ===
 TZ_TOKYO = pytz.timezone("Asia/Tokyo")

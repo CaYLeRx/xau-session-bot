@@ -6,7 +6,12 @@ import pytz
 import yfinance as yf
 
 # === CONFIG ===
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL") or os.environ.get("DISCORD_WEBHOOK") or os.environ.get("WEBHOOK_URL") or "https://discord.com/api/webhooks/1536234080344215592/ghSZUG9w3Mx1ew7Ws9rNb9mBJaBgo6o1wLQwHJXvpcOuAuV0633-tsvPag-TRp_rf4li"
+DISCORD_WEBHOOK_URL = (
+    os.environ.get("DISCORD_WEBHOOK_URL")
+    or os.environ.get("DISCORD_WEBHOOK")
+    or os.environ.get("WEBHOOK_URL")
+    or "https://discord.com/api/webhooks/1536234080344215592/ghSZUG9w3Mx1ew7Ws9rNb9mBJaBgo6o1wLQwHJXvpcOuAuV0633-tsvPag-TRp_rf4li"
+)
 PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "GC=F")
 CURRENCY = os.environ.get("CURRENCY", "$")
 
@@ -19,6 +24,14 @@ TZ_TOKYO = pytz.timezone("Asia/Tokyo")
 TZ_LONDON = pytz.timezone("Europe/London")
 TZ_NY = pytz.timezone("America/New_York")
 TZ_UTC = pytz.utc
+
+# === SESSIONS ===
+# Each entry: name, timezone, start_hour, end_hour, flag
+SESSIONS = [
+    {"name": "Tokyo", "tz": TZ_TOKYO, "start": 0, "end": 9, "flag": "🇯🇵"},
+    {"name": "London", "tz": TZ_LONDON, "start": 8, "end": 17, "flag": "🇬🇧"},
+    {"name": "New York", "tz": TZ_NY, "start": 13, "end": 22, "flag": "🇺🇸"},
+]
 
 def now_in_tz(tz):
     return datetime.now(tz)
@@ -47,21 +60,22 @@ def get_price_change():
         print(f"Change fetch error: {e}")
     return None, None, None
 
-def get_session_status():
-    now_utc = now_in_tz(TZ_UTC)
-    sessions = {
-        "Tokyo": {"tz": TZ_TOKYO, "start": 0, "end": 9, "flag": "🇯🇵"},
-        "London": {"tz": TZ_LONDON, "start": 8, "end": 17, "flag": "🇬🇧"},
-        "New York": {"tz": TZ_NY, "start": 13, "end": 22, "flag": "🇺🇸"},
-    }
-    active = []
-    for name, info in sessions.items():
-        local_now = now_utc.astimezone(info["tz"])
-        hour = local_now.hour
-        is_open = info["start"] <= hour < info["end"]
-        if is_open:
-            active.append(f"{info['flag']} {name}")
-    return active
+def get_session_range_change(session_name, start_hour, end_hour):
+    """Calculate change from previous same session close to current session close."""
+    try:
+        ticker = yf.Ticker(PRICE_SOURCE)
+        data = ticker.history(period="5d")
+        if len(data) < 2:
+            return None, None, None
+        current = float(data["Close"].iloc[-1])
+        # Previous session close is the close before the latest bar
+        previous = float(data["Close"].iloc[-2])
+        change = current - previous
+        pct = (change / previous) * 100
+        return current, change, pct
+    except Exception as e:
+        print(f"Session range change error: {e}")
+        return None, None, None
 
 def format_price(price):
     if price is None:
@@ -94,45 +108,105 @@ def send_discord_embed(title, description, color=16766720):
     except Exception as e:
         print(f"Send error: {e}")
 
+def get_active_sessions():
+    now_utc = now_in_tz(TZ_UTC)
+    active = []
+    for info in SESSIONS:
+        local_now = now_utc.astimezone(info["tz"])
+        hour = local_now.hour
+        if info["start"] <= hour < info["end"]:
+            active.append(f"{info['flag']} {info['name']}")
+    return active
+
 def session_start_message(session_name):
     price, change, pct = get_price_change()
     current_price = price or get_gold_price()
-    active_sessions = get_session_status()
+    active_sessions = get_active_sessions()
     sessions_text = " | ".join(active_sessions) if active_sessions else "No major session active"
+    
     if change is not None:
         color = 65280 if change >= 0 else 16711680
     else:
         color = 16766720
+    
     description = f"""**Current Price:** {format_price(current_price)}
 **Previous Session Change:** {format_price(change)} ({pct:+.2f}%)
 **Active Sessions:** {sessions_text}
 
-Gold is currently trading at {format_price(current_price)}. """
+{get_session_name(session_name)} is now open. Gold is trading at {format_price(current_price)}. """
+    
     send_discord_embed(
         title=f"🥇 {session_name} Session Start — XAUUSD",
         description=description,
         color=color
     )
 
+def session_end_message(session_name):
+    price, change, pct = get_price_change()
+    current_price = price or get_gold_price()
+    
+    if change is not None:
+        color = 65280 if change >= 0 else 16711680
+    else:
+        color = 16766720
+    
+    description = f"""**Session Result:** {format_price(change)} ({pct:+.2f}%)
+**Current Price:** {format_price(current_price)}
+
+{get_session_name(session_name)} has closed. Gold is now at {format_price(current_price)}. """
+    
+    send_discord_embed(
+        title=f"🔔 {session_name} Session End — XAUUSD",
+        description=description,
+        color=color
+    )
+
+def get_session_name(name):
+    return name
+
 def main():
     if not DISCORD_WEBHOOK_URL:
         print("ERROR: DISCORD_WEBHOOK_URL not set")
         return
+    
     now_utc = now_in_tz(TZ_UTC)
     hour_utc = now_utc.hour
-    if hour_utc == 0:
-        session_start_message("Tokyo")
-    elif hour_utc == 8:
-        session_start_message("London")
-    elif hour_utc == 13:
-        session_start_message("New York")
-    else:
-        price = get_gold_price()
-        send_discord_embed(
-            title="🥇 XAUUSD Price Update",
-            description=f"**Gold Spot:** {format_price(price)}",
-            color=16766720
-        )
+    minute_utc = now_utc.minute
+    
+    # Check for session events
+    # Tokyo: 00:00 start, 09:00 end
+    # London: 08:00 start, 17:00 end
+    # New York: 13:00 start, 22:00 end
+    
+    events = []
+    
+    # Tokyo
+    if hour_utc == 0 and minute_utc == 0:
+        events.append(("Tokyo", "start"))
+    if hour_utc == 9 and minute_utc == 0:
+        events.append(("Tokyo", "end"))
+    
+    # London
+    if hour_utc == 8 and minute_utc == 0:
+        events.append(("London", "start"))
+    if hour_utc == 17 and minute_utc == 0:
+        events.append(("London", "end"))
+    
+    # New York
+    if hour_utc == 13 and minute_utc == 0:
+        events.append(("New York", "start"))
+    if hour_utc == 22 and minute_utc == 0:
+        events.append(("New York", "end"))
+    
+    if not events:
+        print(f"No session event at {now_utc.strftime('%Y-%m-%d %H:%M UTC')}")
+        return
+    
+    for session_name, event_type in events:
+        if event_type == "start":
+            session_start_message(session_name)
+        else:
+            session_end_message(session_name)
 
 if __name__ == "__main__":
     main()

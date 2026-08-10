@@ -169,6 +169,15 @@ def main():
         print("ERROR: DISCORD_WEBHOOK_URL not set")
         return
     
+    # Test mode: send immediate test message and exit
+    if os.environ.get("TEST_MODE", "").strip().lower() in ("1", "true", "yes"):
+        send_discord_embed(
+            title="✅ XAUUSD Session Bot — TEST",
+            description="If you can read this, the bot works.\nWebhook delivery: OK",
+            color=65280
+        )
+        return
+    
     now_utc = now_in_tz(TZ_UTC)
     hour_utc = now_utc.hour
     minute_utc = now_utc.minute

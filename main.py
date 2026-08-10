@@ -6,7 +6,7 @@ import pytz
 import yfinance as yf
 
 # === CONFIG ===
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+DISCORD_WEBHOOK_URL = os.environ.get(https://discord.com/api/webhooks/1536234080344215592/ghSZUG9w3Mx1ew7Ws9rNb9mBJaBgo6o1wLQwHJXvpcOuAuV0633-tsvPag-TRp_rf4li)
 PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "GC=F")  # Yahoo Finance ticker
 CURRENCY = os.environ.get("CURRENCY", "$")
 

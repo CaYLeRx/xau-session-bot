@@ -122,6 +122,7 @@ Gold is currently trading at {format_price(current_price)}. """
     )
 
 def main():
+    print(f"DEBUG ENV: webhook_set={bool(DISCORD_WEBHOOK_URL)} price_source={PRICE_SOURCE!r} currency={CURRENCY!r}")
     if not DISCORD_WEBHOOK_URL:
         print("ERROR: DISCORD_WEBHOOK_URL not set")
         return
